@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Ziel-Jagd — Ego Shooter</title>
+    <meta
+      name="description"
+      content="Browser-Ego-Shooter: Schieße auf laufende Ziele, bevor die Zeit abläuft."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #050608;
+        overflow: hidden;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        color: #e8ecf1;
+        user-select: none;
+      }
+      #stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+      #view {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+        image-rendering: -moz-crisp-edges;
+        image-rendering: crisp-edges;
+        cursor: crosshair;
+      }
+      #gun {
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        width: min(46vw, 520px);
+        transform: translateX(-50%);
+        pointer-events: none;
+        filter: drop-shadow(0 -6px 10px rgba(0, 0, 0, 0.45));
+        transition: transform 0.06s ease-out;
+      }
+      #crosshair {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 22px;
+        height: 22px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      #crosshair::before,
+      #crosshair::after {
+        content: "";
+        position: absolute;
+        background: rgba(220, 240, 255, 0.9);
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+      }
+      #crosshair::before {
+        left: 50%;
+        top: 0;
+        width: 2px;
+        height: 100%;
+        transform: translateX(-50%);
+      }
+      #crosshair::after {
+        top: 50%;
+        left: 0;
+        height: 2px;
+        width: 100%;
+        transform: translateY(-50%);
+      }
+      #crosshair.hit::before,
+      #crosshair.hit::after {
+        background: #ff4d4d;
+      }
+      #hud {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 18px 24px;
+        pointer-events: none;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+      }
+      #hud .stat {
+        background: rgba(10, 12, 18, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        padding: 8px 16px;
+        backdrop-filter: blur(4px);
+      }
+      #hud .label {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.65;
+      }
+      #hud .value {
+        font-size: 22px;
+        font-weight: 700;
+      }
+      #hud .value.warn {
+        color: #ff5a5a;
+      }
+      #minimap {
+        position: absolute;
+        bottom: 18px;
+        right: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 8px;
+        background: rgba(5, 6, 10, 0.55);
+        image-rendering: pixelated;
+      }
+      #hit-marker {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 34px;
+        height: 34px;
+        transform: translate(-50%, -50%) scale(0.6);
+        pointer-events: none;
+        opacity: 0;
+      }
+      #hit-marker.show {
+        animation: hitpop 0.22s ease-out;
+      }
+      @keyframes hitpop {
+        0% {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(0.4);
+        }
+        60% {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1.1);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -50%) scale(1.3);
+        }
+      }
+      #hit-marker::before,
+      #hit-marker::after {
+        content: "";
+        position: absolute;
+        width: 3px;
+        height: 14px;
+        background: #ffd23f;
+        top: 50%;
+        left: 50%;
+      }
+      #hit-marker::before {
+        transform: translate(-50%, -50%) rotate(45deg) translateY(-10px);
+      }
+      #hit-marker::after {
+        transform: translate(-50%, -50%) rotate(-45deg) translateY(-10px);
+      }
+      .overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        text-align: center;
+        background: radial-gradient(circle at 50% 40%, rgba(20, 24, 34, 0.92), rgba(2, 3, 6, 0.97));
+        padding: 24px;
+      }
+      .overlay[hidden] {
+        display: none;
+      }
+      .overlay h1 {
+        font-size: clamp(28px, 5vw, 48px);
+        margin: 0;
+        letter-spacing: 0.02em;
+      }
+      .overlay p {
+        max-width: 520px;
+        line-height: 1.5;
+        opacity: 0.85;
+        margin: 0;
+      }
+      .overlay .kbd-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin: 6px 0 4px;
+      }
+      kbd {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-bottom-width: 2px;
+        border-radius: 6px;
+        padding: 4px 9px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+      button.primary {
+        margin-top: 10px;
+        padding: 14px 34px;
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #06110b;
+        background: linear-gradient(180deg, #6bffb0, #29c97a);
+        border: none;
+        border-radius: 999px;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(41, 201, 122, 0.35);
+      }
+      button.primary:hover {
+        filter: brightness(1.08);
+      }
+      button.primary:active {
+        transform: translateY(1px);
+      }
+      .score-final {
+        font-size: clamp(40px, 8vw, 72px);
+        font-weight: 800;
+        margin: 4px 0;
+        color: #6bffb0;
+      }
+      .breakdown {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        justify-content: center;
+        opacity: 0.9;
+      }
+      .breakdown div {
+        min-width: 110px;
+      }
+      .breakdown .n {
+        font-size: 24px;
+        font-weight: 700;
+      }
+      .breakdown .l {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.65;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="view"></canvas>
+      <svg id="gun" viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g fill="#2b2f36" stroke="#0d0e10" stroke-width="2">
+          <rect x="70" y="10" width="34" height="90" rx="4" fill="#3a3f47" />
+          <rect x="60" y="94" width="54" height="18" rx="3" fill="#23262b" />
+          <rect x="76" y="108" width="22" height="46" rx="4" fill="#1c1e22" />
+          <rect x="44" y="60" width="36" height="16" rx="3" fill="#4a505a" />
+          <circle cx="87" cy="24" r="7" fill="#12b3ff" opacity="0.85" />
+        </g>
+      </svg>
+      <div id="crosshair"></div>
+      <div id="hit-marker"></div>
+      <div id="hud">
+        <div class="stat">
+          <div class="label">Punkte</div>
+          <div class="value" id="score">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Zeit</div>
+          <div class="value" id="time">60</div>
+        </div>
+        <div class="stat">
+          <div class="label">Treffer</div>
+          <div class="value" id="hits">0 / 0</div>
+        </div>
+      </div>
+      <canvas id="minimap" width="120" height="120"></canvas>
+
+      <div id="start-screen" class="overlay">
+        <h1>🎯 Ziel-Jagd</h1>
+        <p>
+          Du hast <strong>60 Sekunden</strong>. Laufende Ziele erscheinen in der Arena — triff sie,
+          bevor sie dir entkommen. Ein Treffer auf den Kopf bringt Bonuspunkte.
+        </p>
+        <div class="kbd-row">
+          <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+          <span style="opacity: 0.6; align-self: center">bewegen</span>
+        </div>
+        <div class="kbd-row">
+          <kbd>Maus</kbd>
+          <span style="opacity: 0.6; align-self: center">umsehen</span>
+          <kbd>Klick</kbd>
+          <span style="opacity: 0.6; align-self: center">schießen</span>
+          <kbd>Shift</kbd>
+          <span style="opacity: 0.6; align-self: center">sprinten</span>
+          <kbd>Esc</kbd>
+          <span style="opacity: 0.6; align-self: center">pause</span>
+        </div>
+        <button class="primary" id="start-btn" type="button">Spiel starten</button>
+        <p style="font-size: 12px; opacity: 0.55">
+          Benötigt Pointer Lock (Desktop-Browser mit Maus).
+        </p>
+      </div>
+
+      <div id="pause-screen" class="overlay" hidden>
+        <h1>Pausiert</h1>
+        <p>Klicke, um weiterzuspielen.</p>
+        <button class="primary" id="resume-btn" type="button">Weiter</button>
+      </div>
+
+      <div id="end-screen" class="overlay" hidden>
+        <h1>Zeit abgelaufen!</h1>
+        <div class="score-final" id="final-score">0</div>
+        <div class="breakdown">
+          <div><div class="n" id="final-hits">0</div><div class="l">Treffer</div></div>
+          <div><div class="n" id="final-shots">0</div><div class="l">Schüsse</div></div>
+          <div><div class="n" id="final-acc">0%</div><div class="l">Genauigkeit</div></div>
+          <div><div class="n" id="final-head">0</div><div class="l">Kopftreffer</div></div>
+        </div>
+        <button class="primary" id="restart-btn" type="button">Nochmal spielen</button>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        "use strict";
+
+        // ---------- Arena map ----------------------------------------------------
+        // 1 = concrete wall, 2 = crate stack, 3 = metal pillar, 0 = open floor.
+        const MAP_W = 24;
+        const MAP_H = 24;
+        // prettier-ignore
+        const MAP = [
+          1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+          1,0,3,0,0,0,0,2,2,0,0,0,0,0,0,2,2,0,0,0,0,3,0,1,
+          1,0,0,0,0,0,0,2,2,0,0,0,0,0,0,2,2,0,0,0,0,0,0,1,
+          1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,
+          1,0,0,0,1,1,0,0,0,0,3,0,0,3,0,0,0,0,1,1,0,0,0,1,
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,1,1,1,0,0,0,0,1,1,1,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,
+          1,0,2,2,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,2,2,0,1,
+          1,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,1,
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+          1,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,1,
+          1,0,2,2,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,2,2,0,1,
+          1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,1,1,1,0,0,0,0,1,1,1,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+          1,0,0,0,1,1,0,0,0,0,3,0,0,3,0,0,0,0,1,1,0,0,0,1,
+          1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,
+          1,0,0,0,0,0,0,2,2,0,0,0,0,0,0,2,2,0,0,0,0,0,0,1,
+          1,0,0,0,0,0,0,2,2,0,0,0,0,0,0,2,2,0,0,0,0,0,0,1,
+          1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        ];
+        const cellAt = (x, y) => {
+          const cx = Math.floor(x);
+          const cy = Math.floor(y);
+          if (cx < 0 || cy < 0 || cx >= MAP_W || cy >= MAP_H) return 1;
+          return MAP[cy * MAP_W + cx];
+        };
+        const isOpen = (x, y) => cellAt(x, y) === 0;
+
+        // Straight-line visibility check between two map points (DDA over the grid).
+        function hasLineOfSight(x0, y0, x1, y1) {
+          const dx = x1 - x0;
+          const dy = y1 - y0;
+          const dist = Math.hypot(dx, dy);
+          const steps = Math.ceil(dist * 6);
+          for (let i = 1; i < steps; i++) {
+            const t = i / steps;
+            if (cellAt(x0 + dx * t, y0 + dy * t) !== 0) return false;
+          }
+          return true;
+        }
+
+        const openCells = [];
+        for (let y = 0; y < MAP_H; y++) {
+          for (let x = 0; x < MAP_W; x++) {
+            if (MAP[y * MAP_W + x] === 0) openCells.push({ x: x + 0.5, y: y + 0.5 });
+          }
+        }
+        const randomOpenCell = () => openCells[(Math.random() * openCells.length) | 0];
+
+        // ---------- Canvas / render setup ----------------------------------------
+        const view = document.getElementById("view");
+        const ctx = view.getContext("2d");
+        const minimap = document.getElementById("minimap");
+        const mctx = minimap.getContext("2d");
+        const RES_W = 480;
+        const RES_H = 270;
+        view.width = RES_W;
+        view.height = RES_H;
+
+        function resize() {
+          view.style.width = window.innerWidth + "px";
+          view.style.height = window.innerHeight + "px";
+        }
+        window.addEventListener("resize", resize);
+        resize();
+
+        const FOV = (68 * Math.PI) / 180;
+
+        // ---------- Player state --------------------------------------------------
+        const player = {
+          x: 2.5,
+          y: 2.5,
+          angle: Math.PI / 4,
+          moveSpeed: 3.2,
+          sprintMult: 1.65,
+          radius: 0.22,
+        };
+        {
+          const start = randomOpenCell();
+          player.x = start.x;
+          player.y = start.y;
+        }
+
+        const keys = Object.create(null);
+        let sprinting = false;
+
+        // ---------- Targets (running dummies) -------------------------------------
+        const MAX_TARGETS = 5;
+        const TARGET_SPEED = 1.35;
+        const TARGET_RADIUS = 0.32;
+        let targets = [];
+        let targetIdSeq = 1;
+
+        function spawnTarget() {
+          let pos = randomOpenCell();
+          // Avoid spawning right on top of the player.
+          let tries = 0;
+          while (Math.hypot(pos.x - player.x, pos.y - player.y) < 3 && tries < 20) {
+            pos = randomOpenCell();
+            tries++;
+          }
+          const waypoint = randomOpenCell();
+          targets.push({
+            id: targetIdSeq++,
+            x: pos.x,
+            y: pos.y,
+            waypoint,
+            runCycle: Math.random() * Math.PI * 2,
+            hue: 6 + Math.random() * 18, // reddish tones
+            alive: true,
+            hitFlash: 0,
+          });
+        }
+
+        function updateTargets(dt) {
+          for (const t of targets) {
+            if (!t.alive) continue;
+            const dx = t.waypoint.x - t.x;
+            const dy = t.waypoint.y - t.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 0.15) {
+              let next = randomOpenCell();
+              let tries = 0;
+              while (!hasLineOfSight(t.x, t.y, next.x, next.y) && tries < 10) {
+                next = randomOpenCell();
+                tries++;
+              }
+              t.waypoint = next;
+            } else {
+              const step = Math.min(dist, TARGET_SPEED * dt);
+              const nx = t.x + (dx / dist) * step;
+              const ny = t.y + (dy / dist) * step;
+              if (isOpen(nx, t.y)) t.x = nx;
+              if (isOpen(t.x, ny)) t.y = ny;
+              t.facing = Math.atan2(dy, dx);
+            }
+            t.runCycle += dt * TARGET_SPEED * 6.5;
+            if (t.hitFlash > 0) t.hitFlash = Math.max(0, t.hitFlash - dt * 6);
+          }
+          targets = targets.filter((t) => t.alive || t.hitFlash > 0.001);
+          while (targets.filter((t) => t.alive).length < MAX_TARGETS) spawnTarget();
+        }
+
+        // ---------- Game / round state --------------------------------------------
+        const state = {
+          running: false,
+          paused: false,
+          over: false,
+          timeLeft: 60,
+          score: 0,
+          shots: 0,
+          hits: 0,
+          headshots: 0,
+        };
+
+        const scoreEl = document.getElementById("score");
+        const timeEl = document.getElementById("time");
+        const hitsEl = document.getElementById("hits");
+        const crosshair = document.getElementById("crosshair");
+        const hitMarker = document.getElementById("hit-marker");
+        const gunEl = document.getElementById("gun");
+        const startScreen = document.getElementById("start-screen");
+        const pauseScreen = document.getElementById("pause-screen");
+        const endScreen = document.getElementById("end-screen");
+
+        function refreshHud() {
+          scoreEl.textContent = state.score.toString();
+          timeEl.textContent = Math.ceil(state.timeLeft).toString();
+          timeEl.classList.toggle("warn", state.timeLeft <= 10);
+          hitsEl.textContent = `${state.hits} / ${state.shots}`;
+        }
+
+        function resetRound() {
+          state.running = false;
+          state.paused = false;
+          state.over = false;
+          state.timeLeft = 60;
+          state.score = 0;
+          state.shots = 0;
+          state.hits = 0;
+          state.headshots = 0;
+          targets = [];
+          const start = randomOpenCell();
+          player.x = start.x;
+          player.y = start.y;
+          player.angle = Math.random() * Math.PI * 2;
+          while (targets.length < MAX_TARGETS) spawnTarget();
+          refreshHud();
+        }
+        resetRound();
+
+        // ---------- Audio (synthesized, no external assets) -----------------------
+        let audioCtx = null;
+        function ensureAudio() {
+          if (!audioCtx) {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (AC) audioCtx = new AC();
+          }
+          return audioCtx;
+        }
+        function playShot() {
+          const ac = ensureAudio();
+          if (!ac) return;
+          const dur = 0.12;
+          const buf = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < data.length; i++) {
+            data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+          }
+          const noise = ac.createBufferSource();
+          noise.buffer = buf;
+          const filter = ac.createBiquadFilter();
+          filter.type = "lowpass";
+          filter.frequency.value = 2200;
+          const gain = ac.createGain();
+          gain.gain.setValueAtTime(0.5, ac.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+          noise.connect(filter).connect(gain).connect(ac.destination);
+          noise.start();
+        }
+        function playHit(headshot) {
+          const ac = ensureAudio();
+          if (!ac) return;
+          const osc = ac.createOscillator();
+          const gain = ac.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(headshot ? 1100 : 700, ac.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(headshot ? 1900 : 1000, ac.currentTime + 0.08);
+          gain.gain.setValueAtTime(0.28, ac.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.16);
+          osc.connect(gain).connect(ac.destination);
+          osc.start();
+          osc.stop(ac.currentTime + 0.18);
+        }
+
+        // ---------- Pointer lock + input -------------------------------------------
+        function requestLock() {
+          view.requestPointerLock =
+            view.requestPointerLock || view.mozRequestPointerLock || view.webkitRequestPointerLock;
+          view.requestPointerLock();
+        }
+        function isLocked() {
+          return document.pointerLockElement === view;
+        }
+        document.addEventListener("pointerlockchange", () => {
+          if (isLocked()) {
+            startScreen.hidden = true;
+            pauseScreen.hidden = true;
+            state.paused = false;
+            state.running = !state.over;
+          } else if (!state.over) {
+            state.paused = true;
+            state.running = false;
+            pauseScreen.hidden = false;
+          }
+        });
+        document.addEventListener("mousemove", (e) => {
+          if (!isLocked()) return;
+          const movementX = e.movementX || 0;
+          player.angle += movementX * 0.0022;
+        });
+        document.addEventListener("keydown", (e) => {
+          keys[e.code] = true;
+          if (e.code === "ShiftLeft" || e.code === "ShiftRight") sprinting = true;
+        });
+        document.addEventListener("keyup", (e) => {
+          keys[e.code] = false;
+          if (e.code === "ShiftLeft" || e.code === "ShiftRight") sprinting = false;
+        });
+
+        let lastShotAt = 0;
+        const FIRE_COOLDOWN = 0.22;
+        let elapsedTime = 0;
+
+        function fire() {
+          if (!state.running) return;
+          if (elapsedTime - lastShotAt < FIRE_COOLDOWN) return;
+          lastShotAt = elapsedTime;
+          state.shots++;
+          playShot();
+          gunEl.style.transform = "translateX(-50%) translateY(10px) rotate(-2deg)";
+          setTimeout(() => {
+            gunEl.style.transform = "translateX(-50%)";
+          }, 70);
+
+          const dirX = Math.cos(player.angle);
+          const dirY = Math.sin(player.angle);
+          const planeX = -dirY * Math.tan(FOV / 2);
+          const planeY = dirX * Math.tan(FOV / 2);
+          const centerCol = RES_W / 2;
+
+          let best = null;
+          for (const t of targets) {
+            if (!t.alive) continue;
+            const rdx = t.x - player.x;
+            const rdy = t.y - player.y;
+            const invDet = 1 / (planeX * dirY - dirX * planeY);
+            const transformX = invDet * (dirY * rdx - dirX * rdy);
+            const transformY = invDet * (-planeY * rdx + planeX * rdy);
+            if (transformY <= 0.15) continue;
+            const screenX = (RES_W / 2) * (1 + transformX / transformY);
+            const spriteHeight = Math.abs(RES_H / transformY) * 1.5;
+            const spriteWidth = spriteHeight * 0.55;
+            if (Math.abs(screenX - centerCol) > spriteWidth / 2) continue;
+            const col = Math.max(0, Math.min(RES_W - 1, Math.round(screenX)));
+            if (transformY >= zbuffer[col]) continue; // occluded by wall
+            if (!best || transformY < best.transformY) {
+              const headTopFrac = 0.02;
+              const headBottomFrac = 0.24;
+              const drawStartY = RES_H / 2 - spriteHeight / 2;
+              const headScreenTop = drawStartY + spriteHeight * headTopFrac;
+              const headScreenBottom = drawStartY + spriteHeight * headBottomFrac;
+              const isHead = RES_H / 2 >= headScreenTop && RES_H / 2 <= headScreenBottom;
+              best = { target: t, transformY, isHead };
+            }
+          }
+
+          if (best) {
+            const points = best.isHead ? 250 : 100;
+            state.hits++;
+            if (best.isHead) state.headshots++;
+            state.score += points;
+            best.target.alive = false;
+            best.target.hitFlash = 1;
+            playHit(best.isHead);
+            crosshair.classList.add("hit");
+            setTimeout(() => crosshair.classList.remove("hit"), 120);
+            hitMarker.classList.remove("show");
+            void hitMarker.offsetWidth;
+            hitMarker.classList.add("show");
+          }
+          refreshHud();
+        }
+
+        view.addEventListener("mousedown", (e) => {
+          if (e.button !== 0) return;
+          if (!isLocked()) {
+            requestLock();
+            return;
+          }
+          fire();
+        });
+
+        document.getElementById("start-btn").addEventListener("click", () => {
+          state.over = false;
+          requestLock();
+        });
+        document.getElementById("resume-btn").addEventListener("click", requestLock);
+        document.getElementById("restart-btn").addEventListener("click", () => {
+          endScreen.hidden = true;
+          resetRound();
+          requestLock();
+        });
+
+        // ---------- Movement --------------------------------------------------------
+        function updatePlayer(dt) {
+          const dirX = Math.cos(player.angle);
+          const dirY = Math.sin(player.angle);
+          const rightX = -dirY;
+          const rightY = dirX;
+          let mx = 0;
+          let my = 0;
+          if (keys["KeyW"]) {
+            mx += dirX;
+            my += dirY;
+          }
+          if (keys["KeyS"]) {
+            mx -= dirX;
+            my -= dirY;
+          }
+          if (keys["KeyD"]) {
+            mx += rightX;
+            my += rightY;
+          }
+          if (keys["KeyA"]) {
+            mx -= rightX;
+            my -= rightY;
+          }
+          const len = Math.hypot(mx, my);
+          if (len > 0) {
+            mx /= len;
+            my /= len;
+            const speed = player.moveSpeed * (sprinting ? player.sprintMult : 1);
+            const nx = player.x + mx * speed * dt;
+            const ny = player.y + my * speed * dt;
+            const r = player.radius;
+            if (isOpen(nx + Math.sign(mx) * r, player.y) && isOpen(nx - Math.sign(mx) * r, player.y))
+              player.x = nx;
+            if (isOpen(player.x, ny + Math.sign(my) * r) && isOpen(player.x, ny - Math.sign(my) * r))
+              player.y = ny;
+          }
+        }
+
+        // ---------- Raycasting renderer --------------------------------------------
+        const zbuffer = new Float32Array(RES_W);
+        const WALL_COLORS = {
+          1: [96, 100, 108],
+          2: [168, 108, 62],
+          3: [74, 122, 158],
+        };
+
+        function renderFrame() {
+          const dirX = Math.cos(player.angle);
+          const dirY = Math.sin(player.angle);
+          const planeX = -dirY * Math.tan(FOV / 2);
+          const planeY = dirX * Math.tan(FOV / 2);
+
+          // Sky / ceiling.
+          const skyGrad = ctx.createLinearGradient(0, 0, 0, RES_H / 2);
+          skyGrad.addColorStop(0, "#0c1622");
+          skyGrad.addColorStop(1, "#1c2b3d");
+          ctx.fillStyle = skyGrad;
+          ctx.fillRect(0, 0, RES_W, RES_H / 2);
+          // Floor.
+          const floorGrad = ctx.createLinearGradient(0, RES_H / 2, 0, RES_H);
+          floorGrad.addColorStop(0, "#20221f");
+          floorGrad.addColorStop(1, "#0a0b09");
+          ctx.fillStyle = floorGrad;
+          ctx.fillRect(0, RES_H / 2, RES_W, RES_H / 2);
+
+          for (let col = 0; col < RES_W; col++) {
+            const cameraX = (2 * col) / RES_W - 1;
+            const rayDirX = dirX + planeX * cameraX;
+            const rayDirY = dirY + planeY * cameraX;
+            let mapX = Math.floor(player.x);
+            let mapY = Math.floor(player.y);
+            const deltaDistX = rayDirX === 0 ? 1e30 : Math.abs(1 / rayDirX);
+            const deltaDistY = rayDirY === 0 ? 1e30 : Math.abs(1 / rayDirY);
+            let stepX, sideDistX, stepY, sideDistY;
+            if (rayDirX < 0) {
+              stepX = -1;
+              sideDistX = (player.x - mapX) * deltaDistX;
+            } else {
+              stepX = 1;
+              sideDistX = (mapX + 1 - player.x) * deltaDistX;
+            }
+            if (rayDirY < 0) {
+              stepY = -1;
+              sideDistY = (player.y - mapY) * deltaDistY;
+            } else {
+              stepY = 1;
+              sideDistY = (mapY + 1 - player.y) * deltaDistY;
+            }
+            let hit = 0;
+            let side = 0;
+            let cellVal = 1;
+            for (let i = 0; i < 64 && !hit; i++) {
+              if (sideDistX < sideDistY) {
+                sideDistX += deltaDistX;
+                mapX += stepX;
+                side = 0;
+              } else {
+                sideDistY += deltaDistY;
+                mapY += stepY;
+                side = 1;
+              }
+              cellVal = cellAt(mapX, mapY);
+              if (cellVal > 0) hit = 1;
+            }
+            const perpDist =
+              side === 0
+                ? (mapX - player.x + (1 - stepX) / 2) / (rayDirX || 1e-9)
+                : (mapY - player.y + (1 - stepY) / 2) / (rayDirY || 1e-9);
+            const dist = Math.max(0.05, perpDist);
+            zbuffer[col] = dist;
+
+            const lineHeight = Math.min(RES_H * 3, RES_H / dist);
+            const drawStart = Math.max(0, (RES_H - lineHeight) / 2);
+            const drawEnd = Math.min(RES_H, (RES_H + lineHeight) / 2);
+
+            const base = WALL_COLORS[cellVal] || WALL_COLORS[1];
+            const shade = side === 1 ? 0.72 : 1;
+            const fog = Math.max(0.25, 1 - dist / 16);
+            const r = base[0] * shade * fog;
+            const g = base[1] * shade * fog;
+            const b = base[2] * shade * fog;
+            ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+            ctx.fillRect(col, drawStart, 1, drawEnd - drawStart);
+          }
+
+          // ---- Sprites (running targets) ----
+          const sorted = targets
+            .map((t) => {
+              const rdx = t.x - player.x;
+              const rdy = t.y - player.y;
+              const invDet = 1 / (planeX * dirY - dirX * planeY);
+              const transformX = invDet * (dirY * rdx - dirX * rdy);
+              const transformY = invDet * (-planeY * rdx + planeX * rdy);
+              return { t, transformX, transformY };
+            })
+            .filter((s) => s.transformY > 0.1)
+            .sort((a, b) => b.transformY - a.transformY);
+
+          for (const s of sorted) {
+            const { t, transformX, transformY } = s;
+            const screenX = (RES_W / 2) * (1 + transformX / transformY);
+            const spriteHeight = Math.min(RES_H * 3, Math.abs(RES_H / transformY) * 1.5);
+            const spriteWidth = spriteHeight * 0.55;
+            const drawStartY = Math.max(0, RES_H / 2 - spriteHeight / 2);
+            const drawEndY = Math.min(RES_H, RES_H / 2 + spriteHeight / 2);
+            const drawStartX = Math.round(screenX - spriteWidth / 2);
+            const drawEndX = Math.round(screenX + spriteWidth / 2);
+            if (drawEndX < 0 || drawStartX >= RES_W) continue;
+
+            const legSwing = Math.sin(t.runCycle) * 0.16;
+            const flash = t.hitFlash > 0;
+
+            for (let sx = Math.max(0, drawStartX); sx < Math.min(RES_W, drawEndX); sx++) {
+              if (transformY >= zbuffer[sx]) continue;
+              const u = (sx - drawStartX) / (drawEndX - drawStartX) - 0.5; // -0.5..0.5
+              for (let sy = drawStartY; sy < drawEndY; sy += 1) {
+                const v = (sy - drawStartY) / (drawEndY - drawStartY); // 0..1
+                let on = false;
+                let colorScale = 1;
+                if (v < 0.22) {
+                  // head
+                  on = Math.abs(u) < 0.17 && v > 0.03;
+                  colorScale = 1.15;
+                } else if (v < 0.62) {
+                  // torso
+                  on = Math.abs(u) < 0.3;
+                } else {
+                  // legs, offset in opposite phase to simulate a running stride
+                  const leftLeg = u < 0 && u > -0.28;
+                  const rightLeg = u >= 0 && u < 0.28;
+                  const liftLeft = Math.max(0, legSwing) * 0.3;
+                  const liftRight = Math.max(0, -legSwing) * 0.3;
+                  if (leftLeg) on = v < 1 - liftLeft;
+                  else if (rightLeg) on = v < 1 - liftRight;
+                }
+                if (!on) continue;
+                const fog = Math.max(0.3, 1 - transformY / 14);
+                const hue = flash ? 50 : t.hue;
+                const light = (flash ? 70 : 42) * colorScale * fog;
+                ctx.fillStyle = `hsl(${hue}, ${flash ? 90 : 70}%, ${Math.min(80, light)}%)`;
+                ctx.fillRect(sx, sy | 0, 1, 1.2);
+              }
+            }
+          }
+        }
+
+        function renderMinimap() {
+          const scale = minimap.width / MAP_W;
+          mctx.clearRect(0, 0, minimap.width, minimap.height);
+          for (let y = 0; y < MAP_H; y++) {
+            for (let x = 0; x < MAP_W; x++) {
+              const v = MAP[y * MAP_W + x];
+              if (v === 0) continue;
+              mctx.fillStyle = "rgba(180,190,200,0.55)";
+              mctx.fillRect(x * scale, y * scale, scale, scale);
+            }
+          }
+          for (const t of targets) {
+            if (!t.alive) continue;
+            mctx.fillStyle = "#ff5a5a";
+            mctx.beginPath();
+            mctx.arc(t.x * scale, t.y * scale, 2, 0, Math.PI * 2);
+            mctx.fill();
+          }
+          mctx.fillStyle = "#6bffb0";
+          mctx.beginPath();
+          mctx.arc(player.x * scale, player.y * scale, 2.5, 0, Math.PI * 2);
+          mctx.fill();
+          mctx.strokeStyle = "#6bffb0";
+          mctx.beginPath();
+          mctx.moveTo(player.x * scale, player.y * scale);
+          mctx.lineTo(
+            (player.x + Math.cos(player.angle) * 1.4) * scale,
+            (player.y + Math.sin(player.angle) * 1.4) * scale
+          );
+          mctx.stroke();
+        }
+
+        // ---------- Main loop --------------------------------------------------------
+        let lastFrame = performance.now();
+        function endRound() {
+          state.running = false;
+          state.over = true;
+          document.exitPointerLock && document.exitPointerLock();
+          document.getElementById("final-score").textContent = state.score.toString();
+          document.getElementById("final-hits").textContent = state.hits.toString();
+          document.getElementById("final-shots").textContent = state.shots.toString();
+          document.getElementById("final-head").textContent = state.headshots.toString();
+          const acc = state.shots > 0 ? Math.round((state.hits / state.shots) * 100) : 0;
+          document.getElementById("final-acc").textContent = acc + "%";
+          endScreen.hidden = false;
+        }
+
+        function loop(now) {
+          const dt = Math.min(0.05, (now - lastFrame) / 1000);
+          lastFrame = now;
+          elapsedTime += dt;
+
+          if (state.running && !state.paused && !state.over) {
+            updatePlayer(dt);
+            updateTargets(dt);
+            state.timeLeft -= dt;
+            if (state.timeLeft <= 0) {
+              state.timeLeft = 0;
+              refreshHud();
+              endRound();
+            } else {
+              refreshHud();
+            }
+          }
+
+          renderFrame();
+          renderMinimap();
+          requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+      })();
+    </script>
+  </body>
+</html>
